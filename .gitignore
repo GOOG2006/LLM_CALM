@@ -1,0 +1,25 @@
+# --- Environments / IDE ---
+.venv/
+.idea/
+__pycache__/
+*.pyc
+
+# --- SSH plumbing with HARDCODED CREDENTIALS — never commit ---
+pilot/rgpu.py
+pilot/rput.py
+pilot/rput2.py
+pilot/rget.py
+pilot/poll_*.py
+pilot/pollg.py
+
+# --- Experiment data / logs / model artifacts (kept off the code repo) ---
+*.jsonl
+*.json
+*.npz
+*.pkl
+*.log
+*.bak
+
+# --- OS ---
+.DS_Store
+Thumbs.db
