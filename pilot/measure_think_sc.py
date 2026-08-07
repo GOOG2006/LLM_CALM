@@ -78,9 +78,10 @@ def main():
     for (cid, q, steps, lab) in err + cor:
         if cid in done:
             continue
-        n = len(steps); sol = "\n".join(f"Step {j+1}: {steps[j]}" for j in range(n))
+        n = len(steps)
         for t in range(n):
             if lab >= 0 and t > lab: continue
+            sol = "\n".join(f"Step {j+1}: {steps[j]}" for j in range(t + 1))  # 增量前缀(官方格式,不含未来步)
             user = USER_TMPL.format(q=q, sol=sol, i=t + 1)
             ids = tok.apply_chat_template([{"role": "system", "content": SYS}, {"role": "user", "content": user}],
                                           add_generation_prompt=True, tokenize=True)
@@ -91,7 +92,7 @@ def main():
     if not meta:
         print("nothing new to run", flush=True); return
 
-    llm = LLM(model=a.model, dtype="half", max_model_len=13000, gpu_memory_utilization=0.7, enforce_eager=True, max_num_seqs=16)
+    llm = LLM(model=a.model, dtype="half", max_model_len=13000, gpu_memory_utilization=0.7, enforce_eager=True, max_num_seqs=16, swap_space=0)
     gen_sp = SamplingParams(temperature=0.6, top_p=0.95, max_tokens=a.K, n=a.samples, seed=0)
     gout = llm.generate([{"prompt_token_ids": b} for b in base_list], gen_sp)
 

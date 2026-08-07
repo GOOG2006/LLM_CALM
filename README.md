@@ -1,79 +1,82 @@
-# Verify-by-Measurement: Code-Free Process Verification for LLM Reasoning
+# Auditing and Improving GenPRM: Code-Free & Adaptive Process Verification
 
-Training-free, **code-free** process verification for LLM step-level reasoning, studied against the
-generative process-reward-model baseline **GenPRM** (AAAI 2026) on **ProcessBench**.
+An honest, reproduction-first study of the AAAI-2026 process reward model **GenPRM** on
+**ProcessBench** — auditing whether its results are real, and improving it at inference time
+by controlling **when to use code execution**.
 
-Instead of *generating and parsing* a discrete `Yes/No` verdict per step (as GenPRM does — inheriting
-saturation, format-fragility, and code-execution dependence), we let the model produce a short **code-free
-reasoning rollout** and then **measure the continuous logit** of its correctness belief for the step.
+> ⚠️ **Retraction of earlier claims.** An earlier version of this repo reported a training-free
+> "Verify-by-Measurement" method *beating* GenPRM. Those wins were **invalid**: our in-house
+> reproduction of the GenPRM baseline used the wrong input format (whole solution in one message
+> instead of GenPRM's incremental multi-turn format), which crippled the baseline (F1 45 instead of
+> its true ~77). Against the **correctly reproduced** GenPRM, the training-free method loses badly.
+> This README reflects the corrected findings.
 
-## Key findings (1.5B base = DeepSeek-R1-Distill-Qwen-1.5B, same base as GenPRM-1.5B)
+## 1. Reproduction audit — GenPRM is real
 
-Fair comparison, `n=60` per subset, **100 % step coverage including long chains**, 30 positives/subset.
+Using GenPRM's **official** `prm_evaluate.py` (incremental multi-turn format), GenPRM-1.5B reproduces
+its paper numbers on our hardware:
 
-**Step-level discrimination (AUROC):**
-
-| subset | GenPRM-1.5B | ours (best) |
+| subset | GenPRM paper (Pass@1) | our reproduction |
 |---|---|---|
-| MATH | 0.762 | **0.845** |
-| OlympiadBench | 0.697 | **0.826** |
-| Omni-MATH | 0.669 | **0.707** |
+| GSM8K | 52.8 | 49.4 |
+| MATH | 66.6 | 76.8 (40-case slice) |
 
-**ProcessBench F1 (standard, case-level first-error localization):**
+The published numbers are reproducible — **not fabricated**.
 
-| subset | GenPRM-1.5B (thr 0.5) | ours (τ=1) |
+## 2. Training-free base model fails
+
+The raw base model (`DeepSeek-R1-Distill-Qwen-1.5B`) doing think-then-measure verification gets
+**F1 ≈ 41** — far below fine-tuned GenPRM (~77). **Verification skill comes from GenPRM's
+fine-tuning; it is not available for free from the base model.** Fixing the input format does not
+help the base model (41 → 41).
+
+## 3. Real finding — code execution is harmful on hard problems
+
+GenPRM verifies each step in three stages: `analyze` (NL) → `verify` (writes Python) → `execute`
+(runs it) → `Yes/No`. Dropping the code stages at inference (**analyze-only**, on the fine-tuned
+GenPRM) gives, at ~40% less compute:
+
+| subset | GenPRM full (with code) | ours: analyze-only (code-free) |
 |---|---|---|
-| MATH | **45.4** | 43.1 |
-| OlympiadBench | 22.9 | **44.4** |
-| Omni-MATH | 17.9 | **33.1** |
+| GSM8K | 52.8 | 52.1 |
+| MATH | 66.6 | 64.6 |
+| **OlympiadBench** | 55.1 | **67.5  (+12)** |
+| OmniMATH | 54.5 | 52.0 |
 
-**Takeaway:** comparable on easy MATH, but **~2× more robust on hard/long subsets** (OlympiadBench,
-Omni-MATH) where GenPRM's F1 collapses — precisely where its structural weaknesses (early-commitment on
-long chains; code-execution failures) bite. Including long chains in the evaluation is what reveals this.
+On proof-heavy **OlympiadBench**, GenPRM's generated Python frequently errors
+(`NameError`, `SyntaxError`, …) and the bad code output **pollutes the verdict**. Removing code
+recovers **+12 F1**. On computational subsets it is roughly neutral.
 
-> **Honest caveats** (see `pilot/FINDINGS_measure.md`): ours' F1 threshold τ is currently tuned on the test
-> set (needs a held-out validation split); vLLM sampling has mild batch-order noise (needs multi-seed);
-> 30 positives/subset is moderate power. AUROC advantage does **not** fully translate to F1 — ours' scores
-> need calibration.
+## 4. Adaptive code routing (in progress)
 
-## The measurement iteration (what worked / what didn't)
+Turning the finding into a method: decide **per step** whether to use code.
 
-| operator | AUROC (MATH) | verdict |
-|---|---|---|
-| Detailed-Balance (fwd/bwd irreversibility) | 0.57 | killed (backward term hurts) |
-| static entropy / min-logp | ~0.68 | surface-fluency ceiling |
-| bare Yes/No probe (no reasoning) | ~0.46 | ≈ chance → correctness needs reasoning |
-| hidden-state linear probe | ~0.65 | static representation insufficient |
-| **think-then-measure** (K-token rollout → read verdict logit) | 0.78→0.85 | monotone in reasoning length K |
-| + self-consistency averaging | +margin | boosts easy subsets |
+- **Heuristic router** (use code iff the step contains arithmetic): **fails** — routes too many
+  Olympiad steps to code and reintroduces the harm (Olymp 49 < code-free 67).
+- **Adaptive-control router** (one-strike backoff: once a step's code *errors*, stop using code for
+  the rest of that problem): recovers Olympiad to code-free level in an n=20 sweep, aiming to get
+  **the best of both** — keep code where it works (computational), drop it where it fails (proofs) —
+  automatically, with no per-subset tuning. Scaling up to confirm.
 
 ## Repository layout
 
-- `pilot/measure_think_sc.py` — main method: think-then-measure + self-consistency (vLLM).
-- `pilot/genprm_run.py` — GenPRM baseline runner over ProcessBench (resumable).
-- `pilot/compare_sameset.py` — same-set AUROC + coverage.
-- `pilot/pb_f1.py` — ProcessBench standard F1 (GenPRM vs ours, threshold sweep).
-- `pilot/measure_pilot.py`, `measure_probe.py`, `measure_hidden.py`, `detbal_pilot.py` — the operator ablations above.
-- `pilot/FINDINGS_measure.md` — full, honestly-caveated result log.
-- `BASELINE_ANALYSIS_genprm.md` — 7 evidenced weaknesses of GenPRM that motivate the method.
-- `IDEA_REPORT.md` — the idea-discovery record.
+- `pilot/genprm_run.py` — simple GenPRM runner over ProcessBench (resumable).
+- `GenPRM/src/prm_evaluation/prm_evaluate_adaptive2.py` — generated by `pilot/patch_adaptive2.py`:
+  adds per-step adaptive-control code routing to the official pipeline.
+- `pilot/patch_adaptive.py`, `pilot/patch_adaptive2.py` — patchers that inject routing into the
+  official `prm_evaluate.py`.
+- `pilot/score_repro.py`, `pilot/pb_f1.py`, `pilot/genprm_stepauroc.py` — ProcessBench F1 scoring.
+- `pilot/analyze_good_genprm.py` — weakness re-verification on the correctly-run GenPRM.
+- `pilot/measure_*.py` — the (now-retracted) training-free measurement operator ablations, kept for
+  the record.
+- `pilot/FINDINGS_measure.md` — full, honestly-caveated result log including the reproduction audit.
 
-## Reproduce (single 32 GB GPU, e.g. V100)
+## Honest status
 
-```bash
-# baseline (resumable; --full scores all steps)
-python pilot/genprm_run.py --config olympiadbench --n 60 --majority 1 --full --out out_olymp60.jsonl
-# ours (code-free think-then-measure + SC)
-python pilot/measure_think_sc.py --model <DSR1-Distill-Qwen-1.5B> --n_err 30 --n_cor 30 \
-       --samples 8 --K 512 --subset olympiadbench --genprm out_olymp60.jsonl --out results_olymp.jsonl
-# compare
-python pilot/compare_sameset.py results_olymp.jsonl out_olymp60.jsonl   # AUROC + coverage
-python pilot/pb_f1.py           results_olymp.jsonl out_olymp60.jsonl   # ProcessBench F1
-```
+- Solid: **code execution is unnecessary on easy subsets and harmful on hard ones; code-free is
+  cheaper and +12 on OlympiadBench.**
+- In progress: whether **adaptive-control routing** strictly beats plain code-free at scale.
+- Retracted: any "training-free method beats GenPRM" claim.
 
-Requires GenPRM's code + `Qwen/ProcessBench` subsets locally; run inside an env with `vllm` + `transformers`
-(pinned compatible — vLLM 0.7.x with transformers 4.49).
-
----
-*Research in progress. Results are on a 1.5B base and a 60-case-per-subset slice; not yet the full-benchmark,
-multi-seed, validation-thresholded numbers required for publication.*
+*Numbers are on a 1.5B model and n=60–120-case-per-subset slices vs GenPRM's published full-set
+numbers; full-set, multi-seed, validation-thresholded confirmation is still pending.*
