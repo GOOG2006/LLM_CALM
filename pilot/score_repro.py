@@ -3,7 +3,9 @@
 import sys, json, glob, os
 
 outdir = sys.argv[1]
-files = glob.glob(os.path.join(outdir, "*", "result_*.json"))
+files = []
+for d in sys.argv[1:]:  # 支持多目录合并
+    files += glob.glob(os.path.join(d, "*", "result_*.json"))
 rows = []
 for f in files:
     try:

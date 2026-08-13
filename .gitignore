@@ -9,6 +9,8 @@ pilot/rgpu.py
 pilot/rput.py
 pilot/rput2.py
 pilot/rget.py
+pilot/put.py
+pilot/putb64.py
 pilot/poll_*.py
 pilot/pollg.py
 
