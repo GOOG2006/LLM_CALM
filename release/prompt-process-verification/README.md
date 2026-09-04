@@ -94,6 +94,21 @@ The `src/remote/` helpers run these on a detached GPU box over SSH; set
 `REMOTE_HOST/REMOTE_PORT/REMOTE_USER/REMOTE_PW` env vars first (no credentials are stored
 in the code).
 
+## Automating the loop (`auto/`)
+
+The clauses above were found by a human error-analysis loop. `auto/` is a prototype that
+automates it: an analyst LLM tags the localizer's *checkable* misses, proposes one narrow
+clause per family, and the framework keeps a clause only under three safety invariants
+(gate → union → latent probe-veto) that stop the overfitting/collapse generic
+auto-prompt-optimization suffers. CPU-only demo (no GPU/API):
+
+```bash
+cd auto && python replay_demo.py   # base 67.8 -> union 69.6 (-> 71.5 with cached probe)
+```
+
+Testing a *newly generated* clause needs the GPU verifier; everything else is CPU. See
+`auto/README.md`.
+
 ## Relationship to the sibling work
 
 The latent probe here is the **linear, veto-only** cousin of the **Latent Verdict Head
