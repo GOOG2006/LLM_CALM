@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+*_preds.json
+*.log
+.env
